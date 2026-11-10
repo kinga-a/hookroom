@@ -223,8 +223,8 @@ async function readAppState(store) {
 }
 
 async function statsWithEvents(eventStore, state) {
-  const { summaries } = await eventStore.readIndex();
-  return buildStats(state, summaries);
+  const counters = await eventStore.readCounters();
+  return buildStats(state, null, counters);
 }
 
 export async function handleHook(request, store) {
@@ -331,7 +331,7 @@ async function applyBackupData(data, store, request, currentState, mode = 'merge
       mode,
       summary: restored.summary,
       auth: publicAuth(auth),
-      stats: buildStats(restored.state, (await eventStore.readIndex()).summaries),
+      stats: buildStats(restored.state, null, await eventStore.readCounters()),
     },
   };
 }
@@ -559,11 +559,11 @@ export async function handleApi(request, store) {
       const groupIds = Array.isArray(payload.groupIds)
         ? payload.groupIds.filter((id) => groups.some((group) => group.id === id))
         : [];
-      const knownEventIds = new Set((await eventStore.list({ limit: MAX_EVENTS })).map((event) => event.id));
-      const eventIds = Array.isArray(payload.eventIds)
-        ? payload.eventIds.filter((id) => knownEventIds.has(id))
+      const knownEndpointIds = new Set(initialState.endpoints.map((endpoint) => endpoint.id));
+      const endpointIds = Array.isArray(payload.endpointIds)
+        ? payload.endpointIds.filter((id) => knownEndpointIds.has(id))
         : [];
-      if (!payload.all && !groupIds.length && !eventIds.length) {
+      if (!payload.all && !groupIds.length && !endpointIds.length) {
         throw new HttpError(400, '请选择授权范围，或选择全部权限');
       }
       const secret = `hk_${randomBytes(24).toString('hex')}`;
@@ -571,7 +571,7 @@ export async function handleApi(request, store) {
         name: payload.name,
         note: payload.note,
         groupIds,
-        eventIds,
+        endpointIds,
         readOnly: payload.readOnly === true,
       }, secret);
       initialState.apiKeys.push(key);
@@ -586,11 +586,11 @@ export async function handleApi(request, store) {
       const groupIds = Array.isArray(payload.groupIds)
         ? payload.groupIds.filter((id) => groups.some((group) => group.id === id))
         : undefined;
-      const knownEventIds = new Set((await eventStore.list({ limit: MAX_EVENTS })).map((event) => event.id));
-      const eventIds = Array.isArray(payload.eventIds)
-        ? payload.eventIds.filter((id) => knownEventIds.has(id))
+      const knownEndpointIds = new Set(initialState.endpoints.map((endpoint) => endpoint.id));
+      const endpointIds = Array.isArray(payload.endpointIds)
+        ? payload.endpointIds.filter((id) => knownEndpointIds.has(id))
         : undefined;
-      if (payload.all === false && (groupIds ?? []).length === 0 && (eventIds ?? []).length === 0) {
+      if (payload.all === false && (groupIds ?? []).length === 0 && (endpointIds ?? []).length === 0) {
         throw new HttpError(400, '请选择授权范围，或选择全部权限');
       }
       const index = initialState.apiKeys.findIndex((key) => key.id === apiKeyMatch[1]);
@@ -598,7 +598,7 @@ export async function handleApi(request, store) {
       const next = updateApiKeyRecord(initialState.apiKeys[index], {
         ...payload,
         groupIds: payload.all === true ? [] : groupIds,
-        eventIds: payload.all === true ? [] : eventIds,
+        endpointIds: payload.all === true ? [] : endpointIds,
       });
       initialState.apiKeys[index] = next;
       await store.write(initialState);
@@ -649,10 +649,13 @@ export async function handleApi(request, store) {
         { includeEvents },
       );
       const envelope = encryptBackup(backup, String(payload.password ?? ''));
-      const uploaded = await uploadWebdav(settings.webdav, JSON.stringify(envelope, null, 2));
+      const content = JSON.stringify(envelope, null, 2);
+      const uploaded = await uploadWebdav(settings.webdav, content);
       return json(200, {
         ok: true,
         url: uploaded.url,
+        path: settings.webdav.path || 'hookroom-backup.json',
+        bytes: new TextEncoder().encode(content).length,
         encrypted: Boolean(payload.password),
         exportedAt: backup.exportedAt,
       });

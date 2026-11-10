@@ -147,14 +147,23 @@ function webdavTarget(settings) {
 export async function uploadWebdav(settings, content) {
   const target = webdavTarget(settings);
   await assertSafeOutboundUrl(target.href, { label: 'WebDAV 地址' });
-  const response = await fetch(target, {
-    method: 'PUT',
-    headers: webdavHeaders(settings),
-    body: content,
-    signal: AbortSignal.timeout(60000),
-  });
+  let response;
+  try {
+    response = await fetch(target, {
+      method: 'PUT',
+      headers: webdavHeaders(settings),
+      body: content,
+      signal: AbortSignal.timeout(60000),
+    });
+  } catch (error) {
+    throw new HttpError(502, `WebDAV 连接失败：${error?.cause?.code || error?.message || '无法访问服务器'}`);
+  }
   if (!response.ok) {
-    const detail = (await response.text().catch(() => '')).slice(0, 300);
+    const detail = (await response.text().catch(() => ''))
+      .replace(/<[^>]*>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 120);
     throw new HttpError(502, `WebDAV 上传失败（HTTP ${response.status}）${detail ? `：${detail}` : ''}`);
   }
   return { url: target.href };
@@ -163,11 +172,16 @@ export async function uploadWebdav(settings, content) {
 export async function downloadWebdav(settings) {
   const target = webdavTarget(settings);
   await assertSafeOutboundUrl(target.href, { label: 'WebDAV 地址' });
-  const response = await fetch(target, {
-    method: 'GET',
-    headers: webdavHeaders(settings),
-    signal: AbortSignal.timeout(60000),
-  });
+  let response;
+  try {
+    response = await fetch(target, {
+      method: 'GET',
+      headers: webdavHeaders(settings),
+      signal: AbortSignal.timeout(60000),
+    });
+  } catch (error) {
+    throw new HttpError(502, `WebDAV 连接失败：${error?.cause?.code || error?.message || '无法访问服务器'}`);
+  }
   if (!response.ok) {
     throw new HttpError(502, `WebDAV 下载失败（HTTP ${response.status}）`);
   }

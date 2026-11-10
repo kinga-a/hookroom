@@ -338,9 +338,8 @@ function summarizeEvent(event, endpoints, groups) {
 
 function visibleGroupIds(access, state) {
   const ids = new Set(access.groupIds ?? []);
-  for (const eventId of access.eventIds ?? []) {
-    const event = (state.events ?? []).find((item) => item.id === eventId);
-    const endpoint = state.endpoints.find((item) => item.id === event?.endpointId);
+  for (const endpointId of access.endpointIds ?? []) {
+    const endpoint = state.endpoints.find((item) => item.id === endpointId);
     if (endpoint?.groupId) ids.add(endpoint.groupId);
   }
   return ids;
@@ -349,13 +348,13 @@ function visibleGroupIds(access, state) {
 function allowedEndpoint(access, endpoint, state) {
   if (access.all) return true;
   if (endpoint.groupId && access.groupIds.has(endpoint.groupId)) return true;
-  if (access.eventIds.size && (state.events ?? []).some((event) => event.endpointId === endpoint.id && access.eventIds.has(event.id))) return true;
+  if (access.endpointIds.has(endpoint.id)) return true;
   return !endpoint.groupId && access.includeUngrouped;
 }
 
 function allowedEvent(access, event, state) {
   if (access.all) return true;
-  if (access.eventIds.has(event.id)) return true;
+  if (access.endpointIds.has(event.endpointId)) return true;
   const endpoint = state.endpoints.find((item) => item.id === event.endpointId);
   return Boolean(endpoint && endpoint.groupId && access.groupIds.has(endpoint.groupId));
 }
@@ -743,7 +742,7 @@ function resolveAccess(provided, token, keys) {
       access: {
         all: true,
         groupIds: new Set(),
-        eventIds: new Set(),
+        endpointIds: new Set(),
         readOnly: false,
         includeUngrouped: true,
       },
@@ -760,9 +759,9 @@ function resolveAccess(provided, token, keys) {
   return {
     keyId: key.id,
     access: {
-      all: !(key.groupIds ?? []).length && !(key.eventIds ?? []).length,
+      all: !(key.groupIds ?? []).length && !(key.endpointIds ?? []).length,
       groupIds: new Set(key.groupIds ?? []),
-      eventIds: new Set(key.eventIds ?? []),
+      endpointIds: new Set(key.endpointIds ?? []),
       readOnly: key.readOnly === true,
       includeUngrouped: false,
     },

@@ -54,7 +54,7 @@ const state = {
   totpSetup: null,
   viewMode: 'compact',
   compactPageSize: 10,
-  compactExpandedId: null,
+  compactExpandedIds: new Set(),
   compactPages: {},
   timezone: 'local',
 };
@@ -71,6 +71,7 @@ let toastTimer = null;
 let secretCleared = false;
 let pollTimer = null;
 let pollBusy = false;
+let pollDelay = 5000;
 let streamSource = null;
 let streamErrors = 0;
 
@@ -242,7 +243,7 @@ function cacheDom() {
   dom.apiKeyNote = byId('apiKeyNote');
   dom.apiKeyScopeFields = byId('apiKeyScopeFields');
   dom.apiKeyGroups = byId('apiKeyGroups');
-  dom.apiKeyEvents = byId('apiKeyEvents');
+  dom.apiKeyEndpoints = byId('apiKeyEndpoints');
   dom.apiKeyReadOnly = byId('apiKeyReadOnly');
   dom.apiKeyError = byId('apiKeyError');
   dom.apiKeySaveBtn = byId('apiKeySaveBtn');
@@ -448,16 +449,30 @@ function notifyIfOffscreen(incoming) {
   }
 }
 
+const POLL_ACTIVE = 3000;
+const POLL_IDLE = 10000;
+
+/* 自适应轮询：有新事件 3 秒一拉，空闲逐步退到 10 秒；页面隐藏时完全暂停 */
+function schedulePoll(delay) {
+  clearTimeout(pollTimer);
+  pollTimer = setTimeout(async () => {
+    if (!document.hidden) await pollEvents();
+    schedulePoll(document.hidden ? POLL_IDLE : pollDelay);
+  }, delay);
+}
+
 function startPolling() {
   if (pollTimer) return;
   state.realtime = false;
   setLive('polling');
+  pollDelay = POLL_ACTIVE;
   pollEvents();
-  pollTimer = setInterval(() => {
-    if (!document.hidden) pollEvents();
-  }, 5000);
+  schedulePoll(POLL_ACTIVE);
   document.addEventListener('visibilitychange', () => {
-    if (!document.hidden && pollTimer) pollEvents();
+    if (document.hidden) return;
+    pollDelay = POLL_ACTIVE;
+    pollEvents();
+    schedulePoll(POLL_ACTIVE);
   });
 }
 
@@ -474,6 +489,7 @@ async function pollEvents() {
     );
 
     if (incoming.length) {
+      pollDelay = POLL_ACTIVE;
       incoming.forEach((event) => state.newIds.add(event.id));
       const seen = new Set();
       state.events = [...incoming, ...state.events]
@@ -492,6 +508,7 @@ async function pollEvents() {
     } else if (payload.stats) {
       state.stats.total = Math.max(state.stats.total, Number(payload.stats.total) || 0);
       renderStats();
+      pollDelay = Math.min(POLL_IDLE, pollDelay + 2000);
     }
     setLive('polling');
   } catch {
@@ -1137,11 +1154,11 @@ function renderEndpointChannelSelection() {
     const selected = state.draftChannelIds.includes(channel.id);
     const enabled = channel.enabled !== false;
     return `
-      <label class="channel-select${selected ? ' is-selected' : ''}">
+      <label class="channel-select${selected ? ' is-selected' : ''}${enabled ? '' : ' is-paused'}">
         <input type="checkbox" value="${escapeAttr(channel.id)}"${selected ? ' checked' : ''} />
         <span class="channel-select-main">
           <span class="channel-select-name">${escapeHtml(channel.name || channelLabel(channel.type))}</span>
-          <span class="channel-select-meta">${escapeHtml(channelLabel(channel.type))}${enabled ? '' : ' · 已暂停'}</span>
+          <span class="channel-select-meta">${escapeHtml(channelLabel(channel.type))}${enabled ? '' : ' <span class="channel-paused">已暂停</span>'}</span>
         </span>
       </label>
     `;
@@ -1725,6 +1742,13 @@ function applyViewMode() {
     button.classList.toggle('is-active', active);
     button.setAttribute('aria-pressed', String(active));
   });
+
+  /* 跳过链接跟随当前视图，简约模式跳到端点列表 */
+  const skipLink = document.querySelector('.skip-link');
+  if (skipLink) {
+    skipLink.href = compact ? '#compactList' : '#eventList';
+    skipLink.textContent = compact ? '跳到端点列表' : '跳到请求列表';
+  }
   if (compact) {
     closeDetail();
     renderCompact();
@@ -1787,7 +1811,7 @@ function renderCompact() {
   }
 
   dom.compactList.innerHTML = endpoints.map((endpoint) => {
-    const expanded = state.compactExpandedId === endpoint.id;
+    const expanded = state.compactExpandedIds.has(endpoint.id);
     return `
       <div class="compact-item">
         <button class="compact-endpoint${expanded ? ' is-open' : ''}" type="button" data-compact-endpoint="${escapeAttr(endpoint.id)}" aria-expanded="${expanded}">
@@ -1856,15 +1880,15 @@ function handleCompactClick(event) {
   const id = endpointButton.dataset.compactEndpoint;
   const item = endpointButton.closest('.compact-item');
 
-  if (state.compactExpandedId === id) {
-    state.compactExpandedId = null;
+  if (state.compactExpandedIds.has(id)) {
+    state.compactExpandedIds.delete(id);
     endpointButton.classList.remove('is-open');
     endpointButton.setAttribute('aria-expanded', 'false');
     item?.querySelector('.compact-panel')?.remove();
     return;
   }
 
-  state.compactExpandedId = id;
+  state.compactExpandedIds.add(id);
   if (!state.compactPages[id]) state.compactPages[id] = 1;
   const endpoint = state.endpoints.find((entry) => entry.id === id);
   if (!endpoint || !item) return;
@@ -1956,10 +1980,16 @@ function renderTools() {
 }
 
 function apiKeyScopeText(key) {
-  if (!key.groupIds?.length && !key.eventIds?.length) return '全部数据';
+  if (!key.groupIds?.length && !key.endpointIds?.length) return '全部数据';
   const parts = [];
   if (key.groupIds?.length) parts.push(`分组：${key.groupIds.map((id) => groupLabel(id)).join('、')}`);
-  if (key.eventIds?.length) parts.push(`单条通知：${key.eventIds.length} 条`);
+  if (key.endpointIds?.length) {
+    const names = key.endpointIds
+      .map((id) => state.endpoints.find((item) => item.id === id)?.name)
+      .filter(Boolean);
+    const shown = names.slice(0, 3).join('、');
+    parts.push(`端点：${shown}${names.length > 3 ? ` 等 ${names.length} 个` : ''}`);
+  }
   return parts.join(' · ');
 }
 
@@ -2124,6 +2154,7 @@ function renderBackupTools() {
   return `
     <div class="tools-section">
       <div class="tools-section-head"><div><h3>备份与恢复</h3><p>备份包含端点、分组、渠道、MCP 密钥、账号配置和通知记录。建议设置备份密码。</p></div></div>
+      <p class="tools-result" data-tools-result data-tone="${state.toolsResult?.tone ?? 'success'}"${state.toolsResult ? '' : ' hidden'}>${escapeHtml(state.toolsResult?.text ?? '')}</p>
 
       <h4 class="tools-subtitle">导出到本地</h4>
       <div class="tools-form">
@@ -2144,6 +2175,7 @@ function renderBackupTools() {
       </div>
 
       <h4 class="tools-subtitle">WebDAV</h4>
+      <p class="field-help">${webdav.url ? `当前配置：${escapeHtml(webdav.url)}${webdav.hasPassword ? ' · 密码已保存' : ''}` : '尚未配置 WebDAV 服务'}</p>
       <form class="tools-form" data-tools-form="save-webdav">
         <div class="field"><label for="webdavUrl">WebDAV 目录地址</label><input id="webdavUrl" name="url" type="url" value="${escapeAttr(webdav.url || '')}" placeholder="https://dav.example.com/backups/" /></div>
         <div class="field"><label for="webdavUsername">用户名</label><input id="webdavUsername" name="username" value="${escapeAttr(webdav.username || '')}" autocomplete="off" /></div>
@@ -2188,7 +2220,7 @@ function openApiKeyDialog(key = null) {
   dom.apiKeyNote.value = key?.note ?? '';
   dom.apiKeyReadOnly.checked = key?.readOnly === true;
   renderApiKeyScopeLists(key);
-  const hasScope = (key?.groupIds?.length ?? 0) > 0 || (key?.eventIds?.length ?? 0) > 0;
+  const hasScope = (key?.groupIds?.length ?? 0) > 0 || (key?.endpointIds?.length ?? 0) > 0;
   const scope = key && !hasScope ? 'all' : 'scoped';
   document.querySelectorAll('input[name="apiKeyScope"]').forEach((input) => {
     input.checked = input.value === scope;
@@ -2200,18 +2232,18 @@ function openApiKeyDialog(key = null) {
 
 function renderApiKeyScopeLists(key = null) {
   const selectedGroups = new Set(key?.groupIds ?? []);
-  const selectedEvents = new Set(key?.eventIds ?? []);
+  const selectedEndpoints = new Set(key?.endpointIds ?? []);
   dom.apiKeyGroups.innerHTML = state.groups.length
     ? state.groups.map((group) => `<label class="check-item"><input type="checkbox" value="${escapeAttr(group.id)}" ${selectedGroups.has(group.id) ? 'checked' : ''} /> ${escapeHtml(group.name)}</label>`).join('')
     : '<p class="tools-empty">还没有分组，可在左侧新建。</p>';
-  dom.apiKeyEvents.innerHTML = state.events.length
-    ? state.events.slice(0, 50).map((event) => {
-      const endpoint = state.endpoints.find((item) => item.id === event.endpointId);
-      return `<label class="check-item"><input type="checkbox" value="${escapeAttr(event.id)}" ${selectedEvents.has(event.id) ? 'checked' : ''} />
-        <span><b>${escapeHtml(endpoint?.name ?? '端点')}</b> · ${escapeHtml(event.method)} ${escapeHtml(event.path)}<small>${escapeHtml(extractPreview(event).slice(0, 60))}</small></span>
-      </label>`;
-    }).join('')
-    : '<p class="tools-empty">还没有通知记录。</p>';
+  dom.apiKeyEndpoints.innerHTML = state.endpoints.length
+    ? state.endpoints.map((endpoint) => `
+      <label class="check-item">
+        <input type="checkbox" value="${escapeAttr(endpoint.id)}" ${selectedEndpoints.has(endpoint.id) ? 'checked' : ''} />
+        <span><b>${escapeHtml(endpoint.name)}</b><small>${escapeHtml(`/hook/${endpoint.slug}`)}</small></span>
+      </label>
+    `).join('')
+    : '<p class="tools-empty">还没有接收端点。</p>';
 }
 
 function updateApiKeyScopeVisibility() {
@@ -2230,10 +2262,10 @@ async function saveApiKey(event) {
   }
   const all = document.querySelector('input[name="apiKeyScope"]:checked')?.value === 'all';
   const groupIds = all ? [] : [...dom.apiKeyGroups.querySelectorAll('input:checked')].map((input) => input.value);
-  const eventIds = all ? [] : [...dom.apiKeyEvents.querySelectorAll('input:checked')].map((input) => input.value);
-  if (!all && !groupIds.length && !eventIds.length) {
+  const endpointIds = all ? [] : [...dom.apiKeyEndpoints.querySelectorAll('input:checked')].map((input) => input.value);
+  if (!all && !groupIds.length && !endpointIds.length) {
     dom.apiKeyError.hidden = false;
-    dom.apiKeyError.textContent = '请选择至少一个分组或一条通知';
+    dom.apiKeyError.textContent = '请选择至少一个分组或一个接收端点';
     return;
   }
 
@@ -2241,7 +2273,7 @@ async function saveApiKey(event) {
     name,
     note: dom.apiKeyNote.value.trim(),
     groupIds,
-    eventIds,
+    endpointIds,
     readOnly: dom.apiKeyReadOnly.checked,
     all,
   };
@@ -2317,8 +2349,8 @@ async function handleToolsClick(event) {
   }
   if (action === 'export-local') await exportBackupLocal();
   if (action === 'import-local') await importBackupLocal();
-  if (action === 'webdav-backup') await backupToWebdav();
-  if (action === 'webdav-restore') await restoreFromWebdav();
+  if (action === 'webdav-backup') await backupToWebdav(event.target.closest('[data-tools-action="webdav-backup"]'));
+  if (action === 'webdav-restore') await restoreFromWebdav(event.target.closest('[data-tools-action="webdav-restore"]'));
 }
 
 async function handleToolsSubmit(event) {
@@ -2390,16 +2422,31 @@ async function handleToolsSubmit(event) {
       toast(`显示设置已保存 · 时区 ${TIMEZONE_OPTIONS.find((option) => option.value === timezone)?.label ?? timezone}`);
     }
     if (type === 'save-webdav') {
-      const result = await api('/api/settings/webdav', {
-        method: 'PUT',
-        body: { webdav: values },
-      });
-      state.backupSettings = result.backup;
-      renderTools();
-      toast('WebDAV 设置已保存');
+      const submitBtn = form.querySelector('button[type="submit"]');
+      const submitLabel = submitBtn?.textContent ?? '';
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.textContent = '保存中…';
+      }
+      try {
+        const result = await api('/api/settings/webdav', {
+          method: 'PUT',
+          body: { webdav: values },
+        });
+        state.backupSettings = result.backup;
+        setToolsResult('success', `WebDAV 设置已保存 · ${result.backup.webdav.url || '未设置地址'}`);
+        renderTools();
+        toast('WebDAV 设置已保存', 'neutral', 3600);
+      } finally {
+        if (submitBtn?.isConnected) {
+          submitBtn.disabled = false;
+          submitBtn.textContent = submitLabel;
+        }
+      }
     }
   } catch (error) {
     toolsError(form, error.message);
+    setToolsResult('error', `操作失败：${error.message}`);
   }
 }
 
@@ -2456,33 +2503,64 @@ async function importBackupLocal() {
   }
 }
 
-async function backupToWebdav() {
+async function backupToWebdav(button = null) {
   const password = dom.toolsBody.querySelector('#webdavBackupPassword')?.value ?? '';
   const includeEvents = dom.toolsBody.querySelector('#webdavBackupEvents')?.checked !== false;
+  if (!password) {
+    setToolsResult('error', '请先填写备份加密密码，再点备份');
+    toast('请先填写备份加密密码', 'error', 4200);
+    return;
+  }
+  const label = button?.textContent ?? '';
+  if (button) {
+    button.disabled = true;
+    button.textContent = '备份中…';
+  }
+  setToolsResult('pending', '正在上传备份到 WebDAV…');
   try {
     const result = await api('/api/backup/webdav', {
       method: 'POST',
       body: { password, includeEvents },
     });
-    toast(result.encrypted ? '加密备份已上传到 WebDAV' : '备份已上传到 WebDAV');
+    setToolsResult('success', `备份已上传 · ${result.path} · ${formatBytes(result.bytes)} · ${formatDateTime(result.exportedAt)}`);
+    toast(result.encrypted ? '加密备份已上传到 WebDAV' : '备份已上传到 WebDAV', 'neutral', 4200);
   } catch (error) {
-    toast(`WebDAV 备份失败：${error.message}`, 'error');
+    setToolsResult('error', `备份失败：${error.message}`);
+    toast(`WebDAV 备份失败：${error.message}`, 'error', 4800);
+  } finally {
+    if (button?.isConnected) {
+      button.disabled = false;
+      button.textContent = label;
+    }
   }
 }
 
-async function restoreFromWebdav() {
+async function restoreFromWebdav(button = null) {
   const password = dom.toolsBody.querySelector('#webdavRestorePassword')?.value ?? '';
   const mode = dom.toolsBody.querySelector('#webdavRestoreMode')?.value === 'overwrite' ? 'overwrite' : 'merge';
   const message = mode === 'overwrite'
     ? '覆盖恢复会清空当前所有数据，继续？'
     : '合并恢复会保留现有数据，并补充备份内容，继续？';
   if (!window.confirm(message)) return;
+  const label = button?.textContent ?? '';
+  if (button) {
+    button.disabled = true;
+    button.textContent = '恢复中…';
+  }
+  setToolsResult('pending', '正在从 WebDAV 下载并恢复…');
   try {
     const result = await api('/api/backup/webdav/restore', { method: 'POST', body: { password, mode } });
-    toast(`${result.mode === 'overwrite' ? '覆盖' : '合并'}恢复完成，正在刷新`);
+    setToolsResult('success', `${result.mode === 'overwrite' ? '覆盖' : '合并'}恢复完成，正在刷新`);
+    toast(`${result.mode === 'overwrite' ? '覆盖' : '合并'}恢复完成，正在刷新`, 'neutral', 4200);
     setTimeout(() => window.location.reload(), 600);
   } catch (error) {
-    toast(`WebDAV 恢复失败：${error.message}`, 'error');
+    setToolsResult('error', `恢复失败：${error.message}`);
+    toast(`WebDAV 恢复失败：${error.message}`, 'error', 4800);
+  } finally {
+    if (button?.isConnected) {
+      button.disabled = false;
+      button.textContent = label;
+    }
   }
 }
 
@@ -3119,6 +3197,24 @@ function announce(message) {
   setTimeout(() => {
     dom.streamStatus.textContent = message;
   }, 30);
+}
+
+let toolsResultTimer = null;
+
+function setToolsResult(tone, text) {
+  state.toolsResult = { tone, text };
+  const el = dom.toolsBody.querySelector('[data-tools-result]');
+  if (el) {
+    el.hidden = false;
+    el.dataset.tone = tone;
+    el.textContent = text;
+  }
+  clearTimeout(toolsResultTimer);
+  toolsResultTimer = setTimeout(() => {
+    state.toolsResult = null;
+    const node = dom.toolsBody.querySelector('[data-tools-result]');
+    if (node) node.hidden = true;
+  }, 12000);
 }
 
 function toast(message, tone = 'neutral', duration = 2800) {

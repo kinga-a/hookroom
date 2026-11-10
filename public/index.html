@@ -153,7 +153,7 @@
           <span class="visible-count" id="visibleCount">—</span>
         </div>
 
-        <div class="event-list" id="eventList" role="list" aria-labelledby="feedTitle">
+        <div class="event-list" id="eventList" role="list" aria-labelledby="feedTitle" tabindex="-1">
           <div class="skeleton-row skeleton-row--event" aria-hidden="true"><span class="skeleton skeleton--time"></span><span class="skeleton skeleton--method"></span><span class="skeleton skeleton--path"></span></div>
           <div class="skeleton-row skeleton-row--event" aria-hidden="true"><span class="skeleton skeleton--time"></span><span class="skeleton skeleton--method"></span><span class="skeleton skeleton--path"></span></div>
           <div class="skeleton-row skeleton-row--event" aria-hidden="true"><span class="skeleton skeleton--time"></span><span class="skeleton skeleton--method"></span><span class="skeleton skeleton--path"></span></div>
@@ -184,7 +184,7 @@
           <p class="eyebrow">接收端点</p>
           <p class="compact-count" id="compactCount"></p>
         </div>
-        <div class="compact-list" id="compactList"></div>
+        <div class="compact-list" id="compactList" tabindex="-1"></div>
       </div>
     </main>
   </div>
@@ -404,7 +404,7 @@
         <label>授权范围</label>
         <div class="radio-row">
           <label><input type="radio" name="apiKeyScope" value="all" /> 全部数据</label>
-          <label><input type="radio" name="apiKeyScope" value="scoped" checked /> 指定分组 / 单条通知</label>
+          <label><input type="radio" name="apiKeyScope" value="scoped" checked /> 指定分组 / 接收端点</label>
         </div>
       </div>
       <div id="apiKeyScopeFields">
@@ -413,8 +413,8 @@
           <div class="check-list check-list--groups" id="apiKeyGroups"></div>
         </div>
         <div class="field">
-          <label>授权单条通知</label>
-          <div class="check-list check-list--events" id="apiKeyEvents"></div>
+          <label>授权接收端点</label>
+          <div class="check-list check-list--events" id="apiKeyEndpoints"></div>
         </div>
       </div>
       <label class="checkbox-row">

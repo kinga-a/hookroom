@@ -30,6 +30,18 @@ export function migrateState(state) {
   if (!Array.isArray(state.endpoints)) { state.endpoints = []; changed = true; }
   if (!Array.isArray(state.events)) { state.events = []; changed = true; }
   if (!Array.isArray(state.apiKeys)) { state.apiKeys = []; changed = true; }
+  /* 授权模型 v2：单条通知 → 接收端点；旧密钥停用，避免空授权被当成全量权限 */
+  for (const key of state.apiKeys) {
+    if (!Array.isArray(key.endpointIds)) { key.endpointIds = []; changed = true; }
+    if (Array.isArray(key.eventIds)) {
+      if (key.eventIds.length && !(key.groupIds ?? []).length && !key.endpointIds.length) {
+        key.enabled = false;
+        key.note = `${key.note ? `${key.note} · ` : ''}授权模型已改为端点授权，请重新配置`;
+      }
+      delete key.eventIds;
+      changed = true;
+    }
+  }
   if (state.auth === undefined) { state.auth = null; changed = true; }
   if (typeof state.internalSecret !== 'string' || !state.internalSecret) {
     state.internalSecret = randomBytes(32).toString('hex');
@@ -98,7 +110,7 @@ export function publicApiKey(key) {
     note: key.note || '',
     prefix: key.prefix || '',
     groupIds: key.groupIds ?? [],
-    eventIds: key.eventIds ?? [],
+    endpointIds: key.endpointIds ?? [],
     readOnly: key.readOnly === true,
     enabled: key.enabled !== false,
     createdAt: key.createdAt,
@@ -137,7 +149,7 @@ export function createApiKeyRecord(input, secret) {
     prefix: `${secret.slice(0, 12)}…`,
     hash: hashToken(secret),
     groupIds: cleanIdList(input?.groupIds),
-    eventIds: cleanIdList(input?.eventIds),
+    endpointIds: cleanIdList(input?.endpointIds),
     readOnly: input?.readOnly === true,
     enabled: input?.enabled !== false,
     createdAt: new Date().toISOString(),
@@ -154,7 +166,7 @@ export function updateApiKeyRecord(existing, input) {
   }
   if (input?.note !== undefined) next.note = cleanText(input.note, 160);
   if (input?.groupIds !== undefined) next.groupIds = cleanIdList(input.groupIds);
-  if (input?.eventIds !== undefined) next.eventIds = cleanIdList(input.eventIds);
+  if (input?.endpointIds !== undefined) next.endpointIds = cleanIdList(input.endpointIds);
   if (input?.readOnly !== undefined) next.readOnly = input.readOnly === true;
   if (input?.enabled !== undefined) next.enabled = input.enabled !== false;
   return next;

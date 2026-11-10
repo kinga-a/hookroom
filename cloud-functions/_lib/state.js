@@ -134,12 +134,14 @@ export function trimEvents(events) {
   return trimmed;
 }
 
-export function buildStats(state, summaries = null) {
+export function buildStats(state, summaries = null, counters = null) {
   const today = new Date().toISOString().slice(0, 10);
   const events = Array.isArray(summaries) ? summaries : (Array.isArray(state.events) ? state.events : []);
   return {
-    total: events.length,
-    today: events.filter((event) => String(event.receivedAt).slice(0, 10) === today).length,
+    total: counters ? Number(counters.total) || 0 : events.length,
+    today: counters
+      ? Number(counters.today) || 0
+      : events.filter((event) => String(event.receivedAt).slice(0, 10) === today).length,
     activeEndpoints: state.endpoints.filter((endpoint) => endpoint.active).length,
     endpointCount: state.endpoints.length,
   };
