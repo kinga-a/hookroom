@@ -133,7 +133,7 @@ export function publicBackupSettings(backup) {
     webdav: {
       url: webdav.url || '',
       username: webdav.username || '',
-      path: webdav.path || 'hookroom-backup.json',
+      path: webdav.path || '',
       hasPassword: Boolean(webdav.password),
     },
   };

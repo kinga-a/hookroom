@@ -546,7 +546,7 @@ export async function handleApi(request, store) {
           url: typeof webdav.url === 'string' ? webdav.url.trim().slice(0, 500) : current.url ?? '',
           username: typeof webdav.username === 'string' ? webdav.username.trim().slice(0, 100) : current.username ?? '',
           password: typeof webdav.password === 'string' && webdav.password ? webdav.password.slice(0, 500) : current.password ?? '',
-          path: typeof webdav.path === 'string' && webdav.path.trim() ? webdav.path.trim().slice(0, 200) : (current.path ?? 'hookroom-backup.json'),
+          path: typeof webdav.path === 'string' ? webdav.path.trim().slice(0, 200) : (current.path ?? ''),
         },
       };
       await store.write(initialState);
@@ -654,7 +654,7 @@ export async function handleApi(request, store) {
       return json(200, {
         ok: true,
         url: uploaded.url,
-        path: settings.webdav.path || 'hookroom-backup.json',
+        path: uploaded.path,
         bytes: new TextEncoder().encode(content).length,
         encrypted: Boolean(payload.password),
         exportedAt: backup.exportedAt,

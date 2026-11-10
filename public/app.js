@@ -2180,13 +2180,14 @@ function renderBackupTools() {
         <div class="field"><label for="webdavUrl">WebDAV 目录地址</label><input id="webdavUrl" name="url" type="url" value="${escapeAttr(webdav.url || '')}" placeholder="https://dav.example.com/backups/" /></div>
         <div class="field"><label for="webdavUsername">用户名</label><input id="webdavUsername" name="username" value="${escapeAttr(webdav.username || '')}" autocomplete="off" /></div>
         <div class="field"><label for="webdavPassword">密码</label><input id="webdavPassword" name="password" type="password" placeholder="${webdav.hasPassword ? '已设置，留空保持不变' : 'WebDAV 密码'}" autocomplete="new-password" /></div>
-        <div class="field"><label for="webdavPath">远程文件名</label><input id="webdavPath" name="path" value="${escapeAttr(webdav.path || 'hookroom-backup.json')}" /></div>
+        <div class="field"><label for="webdavPath">恢复文件名 <span class="optional">可选</span></label><input id="webdavPath" name="path" value="${escapeAttr(webdav.path || '')}" placeholder="留空自动找最新的 hookroom-日期.json" /></div>
+        <p class="field-help">备份文件固定命名为 hookroom-YYYY-MM-DD.json。</p>
         <p class="field-error" data-tools-error hidden></p>
         <button class="ghost-btn" type="submit">保存 WebDAV 设置</button>
       </form>
 
       <div class="tools-form">
-        <div class="field"><label for="webdavBackupPassword">备份加密密码 <span class="optional">可选</span></label><input id="webdavBackupPassword" type="password" autocomplete="new-password" /></div>
+        <div class="field"><label for="webdavBackupPassword">备份加密密码 <span class="optional">可选</span></label><input id="webdavBackupPassword" type="password" autocomplete="new-password" placeholder="留空则上传明文（含密钥与渠道令牌，注意安全）" /></div>
         <label class="checkbox-row"><input type="checkbox" id="webdavBackupEvents" checked /> 包含通知记录</label>
         <div class="tools-actions">
           <button class="primary-btn" type="button" data-tools-action="webdav-backup">备份到 WebDAV</button>
@@ -2506,11 +2507,6 @@ async function importBackupLocal() {
 async function backupToWebdav(button = null) {
   const password = dom.toolsBody.querySelector('#webdavBackupPassword')?.value ?? '';
   const includeEvents = dom.toolsBody.querySelector('#webdavBackupEvents')?.checked !== false;
-  if (!password) {
-    setToolsResult('error', '请先填写备份加密密码，再点备份');
-    toast('请先填写备份加密密码', 'error', 4200);
-    return;
-  }
   const label = button?.textContent ?? '';
   if (button) {
     button.disabled = true;
@@ -2522,8 +2518,11 @@ async function backupToWebdav(button = null) {
       method: 'POST',
       body: { password, includeEvents },
     });
-    setToolsResult('success', `备份已上传 · ${result.path} · ${formatBytes(result.bytes)} · ${formatDateTime(result.exportedAt)}`);
-    toast(result.encrypted ? '加密备份已上传到 WebDAV' : '备份已上传到 WebDAV', 'neutral', 4200);
+    setToolsResult(
+      result.encrypted ? 'success' : 'warning',
+      `${result.encrypted ? '加密' : '未加密'}备份已上传 · ${result.path} · ${formatBytes(result.bytes)} · ${formatDateTime(result.exportedAt)}`,
+    );
+    toast(result.encrypted ? '加密备份已上传到 WebDAV' : '备份已上传到 WebDAV（未加密）', result.encrypted ? 'neutral' : 'error', 4600);
   } catch (error) {
     setToolsResult('error', `备份失败：${error.message}`);
     toast(`WebDAV 备份失败：${error.message}`, 'error', 4800);
@@ -3220,9 +3219,18 @@ function setToolsResult(tone, text) {
 function toast(message, tone = 'neutral', duration = 2800) {
   dom.toastText.textContent = message;
   dom.toast.dataset.tone = tone === 'error' ? 'error' : 'neutral';
+  /* popover 会把提示放进 top layer，才能盖住 dialog */
+  if (!dom.toast.matches(':popover-open') && typeof dom.toast.showPopover === 'function') {
+    try { dom.toast.showPopover(); } catch { /* 忽略 */ }
+  }
   dom.toast.classList.add('is-visible');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => dom.toast.classList.remove('is-visible'), duration);
+  toastTimer = setTimeout(() => {
+    dom.toast.classList.remove('is-visible');
+    if (dom.toast.matches(':popover-open') && typeof dom.toast.hidePopover === 'function') {
+      try { dom.toast.hidePopover(); } catch { /* 忽略 */ }
+    }
+  }, duration);
 }
 
 function escapeHtml(value) {

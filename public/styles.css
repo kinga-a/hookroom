@@ -65,6 +65,11 @@
   box-sizing: border-box;
 }
 
+/* hidden 属性必须压过 .field / .login-screen 的 display 规则 */
+[hidden] {
+  display: none !important;
+}
+
 html,
 body {
   margin: 0;
@@ -1831,6 +1836,11 @@ body.is-dragging .endpoint {
   right: 26px;
   bottom: 24px;
   z-index: 100;
+  margin: 0;
+  inset: auto 26px 24px auto;
+  border: 0;
+  width: max-content;
+  max-width: min(420px, calc(100vw - 32px));
   display: inline-flex;
   align-items: center;
   gap: 9px;
@@ -2345,7 +2355,7 @@ body.panel-open {
 }
 
 .live[data-state='polling'] {
-  color: rgba(238, 241, 232, 0.82);
+  color: var(--ink);
 }
 
 .live[data-state='polling'] .live-dot {
@@ -2810,6 +2820,12 @@ body.panel-open {
   background: #fbf1ee;
   border-color: #ecd0c5;
   color: #8a3d26;
+}
+
+.tools-result[data-tone='warning'] {
+  background: #fdf6e8;
+  border-color: #ecd9b4;
+  color: #7a5418;
 }
 
 .tools-result[data-tone='pending'] {
@@ -3792,6 +3808,22 @@ html.view-detail .view-switch button[data-view-mode="detail"],
 }
 
 @media (max-width: 680px) {
+  .toast {
+    left: 12px;
+    right: 12px;
+    bottom: calc(14px + env(safe-area-inset-bottom, 0px));
+    inset: auto 12px calc(14px + env(safe-area-inset-bottom, 0px)) 12px;
+    width: auto;
+    max-width: none;
+    justify-content: center;
+    text-align: center;
+  }
+
+  .tools-result {
+    font-size: 12px;
+    padding: 9px 11px;
+  }
+
   #openCurlBtn {
     display: none;
   }

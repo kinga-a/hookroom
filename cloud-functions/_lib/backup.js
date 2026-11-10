@@ -35,9 +35,8 @@ export function buildBackup(state, { includeEvents = true } = {}) {
 
 export function encryptBackup(backup, password) {
   const secret = String(password ?? '');
-  if (!secret) {
-    throw new HttpError(400, '导出备份必须设置密码：明文备份会包含端点密钥与渠道令牌');
-  }
+  /* 允许留空：此时导出明文备份（包含密钥与渠道令牌，前端会提示风险） */
+  if (!secret) return backup;
   if (secret.length < 6) {
     throw new HttpError(400, '备份密码至少 6 位');
   }
@@ -131,7 +130,18 @@ function webdavHeaders(settings) {
   return headers;
 }
 
-function webdavTarget(settings) {
+function localDateStamp() {
+  const now = new Date();
+  const pad = (value) => String(value).padStart(2, '0');
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+}
+
+/* 默认文件名：hookroom-YYYY-MM-DD.json */
+export function backupFilename() {
+  return `hookroom-${localDateStamp()}.json`;
+}
+
+function webdavBase(settings) {
   let base;
   try {
     base = new URL(String(settings.url ?? ''));
@@ -140,12 +150,18 @@ function webdavTarget(settings) {
   }
   if (!['http:', 'https:'].includes(base.protocol)) throw new HttpError(400, 'WebDAV 只支持 http 或 https');
   if (!base.pathname.endsWith('/')) base.pathname += '/';
-  const path = String(settings.path || 'hookroom-backup.json').replace(/^\/+/, '');
-  return new URL(path, base);
+  return base;
+}
+
+function webdavTarget(settings, filename) {
+  const name = String(filename || settings.path || backupFilename()).trim().replace(/^\/+/, '');
+  if (!name) throw new HttpError(400, '备份文件名不能为空');
+  return new URL(name, webdavBase(settings));
 }
 
 export async function uploadWebdav(settings, content) {
-  const target = webdavTarget(settings);
+  const filename = backupFilename();
+  const target = webdavTarget(settings, filename);
   await assertSafeOutboundUrl(target.href, { label: 'WebDAV 地址' });
   let response;
   try {
@@ -166,11 +182,11 @@ export async function uploadWebdav(settings, content) {
       .slice(0, 120);
     throw new HttpError(502, `WebDAV 上传失败（HTTP ${response.status}）${detail ? `：${detail}` : ''}`);
   }
-  return { url: target.href };
+  return { url: target.href, path: filename };
 }
 
-export async function downloadWebdav(settings) {
-  const target = webdavTarget(settings);
+async function readDavFile(settings, filename) {
+  const target = webdavTarget(settings, filename);
   await assertSafeOutboundUrl(target.href, { label: 'WebDAV 地址' });
   let response;
   try {
@@ -182,8 +198,56 @@ export async function downloadWebdav(settings) {
   } catch (error) {
     throw new HttpError(502, `WebDAV 连接失败：${error?.cause?.code || error?.message || '无法访问服务器'}`);
   }
+  if (response.status === 404) return null;
   if (!response.ok) {
     throw new HttpError(502, `WebDAV 下载失败（HTTP ${response.status}）`);
   }
   return response.text();
+}
+
+async function listDavBackups(settings) {
+  const target = webdavBase(settings);
+  await assertSafeOutboundUrl(target.href, { label: 'WebDAV 地址' });
+  let response;
+  try {
+    response = await fetch(target, {
+      method: 'PROPFIND',
+      headers: { ...webdavHeaders(settings), Depth: '1' },
+      signal: AbortSignal.timeout(20000),
+    });
+  } catch {
+    return [];
+  }
+  if (!response.ok) return [];
+  const xml = await response.text().catch(() => '');
+  const names = [...xml.matchAll(/<(?:\w+:)?href>([^<]+)<\/(?:\w+:)?href>/gi)]
+    .map((match) => {
+      try {
+        const segments = match[1].split('/').filter(Boolean);
+        return decodeURIComponent(segments[segments.length - 1] || '');
+      } catch {
+        return '';
+      }
+    })
+    .filter((name) => /^hookroom-\d{4}-\d{2}-\d{2}\.json$/i.test(name));
+  return [...new Set(names)].sort().reverse();
+}
+
+/* 恢复：先试配置文件名与当天文件，再列目录找最新的 hookroom-日期.json */
+export async function downloadWebdav(settings) {
+  const candidates = [backupFilename()];
+  const configured = String(settings.path || '').trim();
+  if (configured) candidates.push(configured);
+
+  for (const name of candidates) {
+    const content = await readDavFile(settings, name);
+    if (content !== null) return content;
+  }
+
+  for (const name of await listDavBackups(settings)) {
+    const content = await readDavFile(settings, name);
+    if (content !== null) return content;
+  }
+
+  throw new HttpError(404, 'WebDAV 上没有找到备份文件');
 }
