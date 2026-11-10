@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Hookroom">
+  <rect width="32" height="32" rx="8" fill="#182a24"/>
+  <path d="M10 7v11a6 6 0 0 0 12 0v-4" fill="none" stroke="#a7cdb7" stroke-width="2.1" stroke-linecap="round"/>
+  <path d="M22 7v7" fill="none" stroke="#a7cdb7" stroke-width="2.1" stroke-linecap="round"/>
+  <circle cx="10" cy="7" r="2" fill="#a7cdb7"/>
+  <circle cx="22" cy="7" r="2" fill="#a7cdb7"/>
+</svg>

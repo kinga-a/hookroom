@@ -1,0 +1,504 @@
+<!doctype html>
+<html lang="zh-CN" class="view-compact">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Hookroom · Webhook 收件箱</title>
+  <meta name="description" content="Hookroom 是一个本地优先的 Webhook 收件箱：接收、检查、重放请求，端点支持拖拽排序，配置保存在浏览器。" />
+  <meta name="theme-color" content="#182a24" />
+  <script>
+    (function () {
+      var mode = 'compact';
+      try {
+        if (localStorage.getItem('hookroom:viewMode:v2') === 'detail') mode = 'detail';
+      } catch (error) {}
+      document.documentElement.classList.remove('view-compact', 'view-detail');
+      document.documentElement.classList.add('view-' + mode);
+    })();
+  </script>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <a class="skip-link" href="#eventList">跳到请求列表</a>
+  <div class="grain" aria-hidden="true"></div>
+
+  <div class="app">
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="Hookroom 首页">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round">
+            <path d="M7.5 3.5v8.75a4.75 4.75 0 0 0 9.5 0V9" />
+            <path d="M17 3.5v5.5" />
+            <circle cx="7.5" cy="3.5" r="1.5" fill="currentColor" stroke="none" />
+            <circle cx="17" cy="3.5" r="1.5" fill="currentColor" stroke="none" />
+          </svg>
+        </span>
+        <span class="brand-text">HOOKROOM <span class="brand-cn">钩子间</span></span>
+      </a>
+
+      <div class="view-switch" role="group" aria-label="视图模式">
+        <button type="button" data-view-mode="compact" aria-pressed="true">简约</button>
+        <button type="button" data-view-mode="detail" aria-pressed="false">详情</button>
+      </div>
+
+      <div class="topbar-right">
+        <div class="live" id="liveStatus" data-state="connecting" role="status">
+          <span class="live-dot" aria-hidden="true"></span>
+          <span class="live-label">连接中</span>
+        </div>
+        <button class="topbar-link" id="openToolsBtn" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/>
+          </svg>
+          设置
+        </button>
+        <button class="topbar-link" id="openCurlBtn" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="m5 7 4 5-4 5" /><path d="M12 17h7" />
+          </svg>
+          curl 示例
+        </button>
+      </div>
+    </header>
+
+    <main class="workspace" id="detailWorkspace">
+      <section class="rail" aria-labelledby="railTitle">
+        <div class="rail-head">
+          <p class="eyebrow">接收端点</p>
+          <h2 id="railTitle">收件口 <span class="count-chip" id="endpointCount">—</span></h2>
+          <p class="hint">拖动左侧手柄在同组内调整顺序，也可以用键盘 ↑ ↓。端点可在编辑里切换分组。</p>
+          <div class="rail-tools">
+            <span>分组</span>
+            <button class="link-btn" id="addGroupBtn" type="button">+ 新建分组</button>
+          </div>
+        </div>
+
+        <div class="endpoint-list" id="endpointList" role="list" aria-describedby="dragHelp">
+          <div class="skeleton-row" aria-hidden="true"><span class="skeleton skeleton--handle"></span><span class="skeleton-lines"><span class="skeleton skeleton--title"></span><span class="skeleton skeleton--meta"></span></span></div>
+          <div class="skeleton-row" aria-hidden="true"><span class="skeleton skeleton--handle"></span><span class="skeleton-lines"><span class="skeleton skeleton--title"></span><span class="skeleton skeleton--meta"></span></span></div>
+          <div class="skeleton-row" aria-hidden="true"><span class="skeleton skeleton--handle"></span><span class="skeleton-lines"><span class="skeleton skeleton--title"></span><span class="skeleton skeleton--meta"></span></span></div>
+        </div>
+        <p class="sr-only" id="dragHelp">每个端点左侧的手柄支持拖动排序，聚焦手柄后按上下方向键也能调整位置。</p>
+        <p class="sr-only" id="orderStatus" aria-live="polite"></p>
+
+        <button class="add-btn" id="addEndpointBtn" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true">
+            <path d="M12 5.5v13M5.5 12h13" />
+          </svg>
+          新建接收端点
+        </button>
+
+        <div class="rail-foot">
+          <div class="storage-note">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="4" y="5" width="16" height="14" rx="2.5" />
+              <path d="M8 9.5h8M8 14h5" />
+            </svg>
+            <p id="storageNote">本地优先：端点与排序存在 <code>localStorage</code>，同时同步给本机 Node 服务，用于接收请求。</p>
+          </div>
+          <button class="link-btn" id="restoreSamplesBtn" type="button">恢复示例端点</button>
+        </div>
+      </section>
+
+      <section class="feed" aria-labelledby="feedTitle">
+        <header class="feed-head">
+          <div class="feed-title">
+            <p class="eyebrow" id="feedEyebrow">全部端点</p>
+            <h1 id="feedTitle">请求流水</h1>
+            <div class="hook-line" id="hookLine" hidden>
+              <code id="hookUrl">/hook/example</code>
+              <button class="icon-btn icon-btn--label" id="copyEndpointUrl" type="button" aria-label="复制接收地址">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <rect x="9" y="9" width="11" height="11" rx="2.2" />
+                  <path d="M15 5.5A2.5 2.5 0 0 0 12.5 3H6.2A2.2 2.2 0 0 0 4 5.2v6.3A2.5 2.5 0 0 0 6.5 14" />
+                </svg>
+                复制
+              </button>
+            </div>
+          </div>
+          <div class="feed-actions">
+            <button class="ghost-btn" id="viewAllBtn" type="button" hidden>查看全部</button>
+            <button class="ghost-btn" id="clearEventsBtn" type="button" data-armed="false">清空记录</button>
+          </div>
+        </header>
+
+        <div class="statstrip" aria-label="总体统计">
+          <div class="stat">
+            <span class="stat-value" data-stat="total">—</span>
+            <span class="stat-label">累计请求</span>
+          </div>
+          <div class="stat">
+            <span class="stat-value" data-stat="today">—</span>
+            <span class="stat-label">今日</span>
+          </div>
+          <div class="stat">
+            <span class="stat-value" data-stat="active">—</span>
+            <span class="stat-label">活跃端点</span>
+          </div>
+          <div class="stat stat--wide">
+            <span class="stat-value stat-value--text"><span class="status-dot" aria-hidden="true"></span> 本机服务</span>
+            <span class="stat-label">事件实时推送</span>
+          </div>
+        </div>
+
+        <div class="feed-toolbar">
+          <div class="filters" role="group" aria-label="按请求方法筛选">
+            <button class="filter is-active" data-method="" type="button" aria-pressed="true">全部</button>
+            <button class="filter" data-method="POST" type="button" aria-pressed="false">POST</button>
+            <button class="filter" data-method="GET" type="button" aria-pressed="false">GET</button>
+            <button class="filter" data-method="PUT" type="button" aria-pressed="false">PUT</button>
+            <button class="filter" data-method="DELETE" type="button" aria-pressed="false">DELETE</button>
+          </div>
+          <span class="visible-count" id="visibleCount">—</span>
+        </div>
+
+        <div class="event-list" id="eventList" role="list" aria-labelledby="feedTitle">
+          <div class="skeleton-row skeleton-row--event" aria-hidden="true"><span class="skeleton skeleton--time"></span><span class="skeleton skeleton--method"></span><span class="skeleton skeleton--path"></span></div>
+          <div class="skeleton-row skeleton-row--event" aria-hidden="true"><span class="skeleton skeleton--time"></span><span class="skeleton skeleton--method"></span><span class="skeleton skeleton--path"></span></div>
+          <div class="skeleton-row skeleton-row--event" aria-hidden="true"><span class="skeleton skeleton--time"></span><span class="skeleton skeleton--method"></span><span class="skeleton skeleton--path"></span></div>
+        </div>
+        <p class="sr-only" id="streamStatus" aria-live="polite"></p>
+
+        <div class="empty-state" id="emptyState" hidden>
+          <div class="empty-art" aria-hidden="true">
+            <svg viewBox="0 0 96 64" fill="none" stroke="currentColor" stroke-width="1.2">
+              <path d="M4 32h21l6-11 9 24 8-30 7 17h37" stroke-linecap="round" stroke-linejoin="round" />
+              <circle cx="87" cy="32" r="3.5" />
+            </svg>
+          </div>
+          <h3 id="emptyTitle">还没有收到请求</h3>
+          <p id="emptyText">用一条 curl 命令把请求推到这个端点，它会立刻出现在这里。</p>
+          <button class="ghost-btn" id="emptyCurlBtn" type="button">查看发送示例</button>
+        </div>
+
+        <div class="feed-foot">
+          <p>记录保留最近 500 条 · 端点与排序保存在本机浏览器</p>
+        </div>
+      </section>
+    </main>
+
+    <main class="compact-view" id="compactView">
+      <div class="compact-shell">
+        <div class="compact-head">
+          <p class="eyebrow">接收端点</p>
+          <p class="compact-count" id="compactCount"></p>
+        </div>
+        <div class="compact-list" id="compactList"></div>
+      </div>
+    </main>
+  </div>
+
+  <div class="scrim" id="scrim" hidden></div>
+
+  <aside class="detail-panel" id="detailPanel" aria-label="请求详情" aria-hidden="true">
+    <div class="detail-head">
+      <div class="detail-head-top">
+        <p class="eyebrow">请求详情</p>
+        <button class="icon-btn" id="closeDetailBtn" type="button" aria-label="关闭详情">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true">
+            <path d="M6 6l12 12M18 6 6 18" />
+          </svg>
+        </button>
+      </div>
+      <div class="detail-method-line">
+        <span class="method-badge" id="detailMethod">POST</span>
+        <code id="detailPath">/hook/example</code>
+      </div>
+      <p class="detail-sub" id="detailSub">—</p>
+    </div>
+    <div class="detail-body" id="detailBody"></div>
+  </aside>
+
+  <dialog class="dialog" id="endpointDialog" aria-labelledby="dialogTitle">
+    <form class="dialog-form" id="endpointForm" novalidate>
+      <div class="dialog-head">
+        <div>
+          <p class="eyebrow">接收端点</p>
+          <h2 id="dialogTitle">新建端点</h2>
+        </div>
+        <button class="icon-btn" type="button" data-close-dialog aria-label="关闭">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true">
+            <path d="M6 6l12 12M18 6 6 18" />
+          </svg>
+        </button>
+      </div>
+
+      <div class="field">
+        <label for="fieldName">名称</label>
+        <input id="fieldName" name="name" maxlength="40" autocomplete="off" placeholder="例如：部署通知" aria-describedby="nameError" required />
+        <p class="field-error" id="nameError" hidden></p>
+      </div>
+
+      <div class="field">
+        <label for="fieldSlug">接收路径</label>
+<div class="slug-input">
+            <span>/hook/</span>
+            <input id="fieldSlug" name="slug" maxlength="40" autocomplete="off" spellcheck="false" placeholder="deploy-notify" aria-describedby="slugHelp slugError" required />
+          </div>
+          <p class="field-help" id="slugHelp">小写字母、数字和中划线，2–40 位，需要全站唯一。</p>
+          <p class="field-error" id="slugError" hidden></p>
+      </div>
+
+      <div class="field">
+        <label for="fieldGroup">分组</label>
+        <select id="fieldGroup"></select>
+        <p class="field-help">分组用于在左侧按团队或业务归类端点。</p>
+      </div>
+
+      <div class="field">
+        <label for="fieldDescription">说明 <span class="optional">可选</span></label>
+        <textarea id="fieldDescription" name="description" rows="2" maxlength="160" placeholder="这个端点接收什么事件？"></textarea>
+      </div>
+
+      <div class="field">
+        <label for="fieldTarget">默认重放地址 <span class="optional">可选</span></label>
+        <input id="fieldTarget" name="targetUrl" type="url" autocomplete="off" placeholder="https://example.com/webhooks" aria-describedby="targetHelp targetError" />
+        <p class="field-help" id="targetHelp">只在手动重放请求时使用，不会自动转发。收到请求时的自动通知请在下方配置通知渠道。</p>
+        <p class="field-error" id="targetError" hidden></p>
+      </div>
+
+      <div class="field channel-field">
+        <div class="field-heading">
+          <div>
+            <label>通知渠道 <span class="optional">可选</span></label>
+            <p class="field-help">勾选在工具中已配置的渠道，收到请求后自动发送。失败会自动重试 1 次。</p>
+          </div>
+          <button class="ghost-btn ghost-btn--compact" id="manageChannelsBtn" type="button">管理渠道</button>
+        </div>
+        <div class="channel-selection" id="endpointChannelList"></div>
+      </div>
+
+      <div class="field">
+        <label for="fieldSecret">签名密钥 Secret <span class="optional">可选</span></label>
+        <div class="secret-input">
+          <input id="fieldSecret" name="secret" type="password" maxlength="200" autocomplete="new-password" spellcheck="false" placeholder="平台提供的 Secret，留空表示不校验" aria-describedby="secretHelp secretError" />
+          <button class="secret-generate" id="generateSecretBtn" type="button">生成</button>
+          <button class="icon-btn" id="toggleSecretBtn" type="button" aria-label="显示密钥">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12s3.5-6 9-6 9 6 9 6-3.5 6-9 6-9-6-9-6Z"/><circle cx="12" cy="12" r="2.6"/></svg>
+          </button>
+        </div>
+        <p class="field-help" id="secretHelp">启用后，请求必须携带有效签名（X-Signature / X-Hub-Signature-256 / Stripe-Signature），校验失败返回 401。Notely 自定义 Webhook 使用 X-Signature（sha256=…）。</p>
+        <p class="field-error" id="secretError" hidden></p>
+        <button class="link-btn secret-clear" id="clearSecretBtn" type="button" hidden>清除已设置的密钥</button>
+      </div>
+
+      <div class="dialog-foot">
+        <button class="danger-link" id="deleteEndpointBtn" type="button" hidden>删除端点</button>
+        <button class="ghost-btn" type="button" data-close-dialog>取消</button>
+        <button class="primary-btn" type="submit">保存端点</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="dialog" id="groupDialog" aria-labelledby="groupDialogTitle">
+    <form class="dialog-form" id="groupForm" novalidate>
+      <div class="dialog-head">
+        <div>
+          <p class="eyebrow">分组</p>
+          <h2 id="groupDialogTitle">新建分组</h2>
+        </div>
+        <button class="icon-btn" type="button" data-close-group aria-label="关闭">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true">
+            <path d="M6 6l12 12M18 6 6 18" />
+          </svg>
+        </button>
+      </div>
+      <div class="field">
+        <label for="groupName">分组名称</label>
+        <input id="groupName" maxlength="30" autocomplete="off" placeholder="例如：运维、开发、生产环境" />
+        <p class="field-error" id="groupError" hidden></p>
+      </div>
+      <div class="dialog-foot">
+        <button class="ghost-btn" type="button" data-close-group>取消</button>
+        <button class="primary-btn" id="groupSaveBtn" type="submit">保存分组</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="dialog dialog--wide" id="channelDialog" aria-labelledby="channelDialogTitle">
+    <form class="dialog-form" id="channelForm" novalidate>
+      <div class="dialog-head">
+        <div>
+          <p class="eyebrow">通知渠道</p>
+          <h2 id="channelDialogTitle">添加通知渠道</h2>
+        </div>
+        <button class="icon-btn" type="button" data-close-channel aria-label="关闭">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true">
+            <path d="M6 6l12 12M18 6 6 18" />
+          </svg>
+        </button>
+      </div>
+
+      <div class="field">
+        <label for="channelType">渠道类型</label>
+        <select id="channelType" name="type"></select>
+        <p class="field-help" id="channelTypeHelp"></p>
+      </div>
+
+      <div class="field">
+        <label for="channelName">显示名称 <span class="optional">可选</span></label>
+        <input id="channelName" maxlength="40" autocomplete="off" placeholder="例如：运维告警群" />
+      </div>
+
+      <div id="channelFields" class="channel-fields"></div>
+
+      <label class="checkbox-row">
+        <input type="checkbox" id="channelEnabled" checked />
+        启用这个渠道
+      </label>
+
+      <div class="dialog-foot">
+        <button class="ghost-btn" type="button" data-close-channel>取消</button>
+        <button class="primary-btn" id="channelSaveBtn" type="submit">保存渠道</button>
+      </div>
+    </form>
+  </dialog>
+
+
+  <dialog class="dialog dialog--tools" id="toolsDialog" aria-labelledby="toolsTitle">
+    <div class="tools-head">
+      <div>
+        <p class="eyebrow">控制中心</p>
+        <h2 id="toolsTitle">设置</h2>
+      </div>
+      <button class="icon-btn" type="button" data-close-tools aria-label="关闭">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true">
+          <path d="M6 6l12 12M18 6 6 18" />
+        </svg>
+      </button>
+    </div>
+    <div class="tools-tabs" role="tablist" aria-label="工具分类">
+      <button class="tools-tab is-active" data-tools-tab="keys" type="button" role="tab" aria-selected="true">MCP 密钥</button>
+      <button class="tools-tab" data-tools-tab="channels" type="button" role="tab" aria-selected="false">通知渠道</button>
+      <button class="tools-tab" data-tools-tab="display" type="button" role="tab" aria-selected="false">显示</button>
+      <button class="tools-tab" data-tools-tab="security" type="button" role="tab" aria-selected="false">安全</button>
+      <button class="tools-tab" data-tools-tab="backup" type="button" role="tab" aria-selected="false">备份</button>
+    </div>
+    <div class="tools-body" id="toolsBody"></div>
+  </dialog>
+
+  <dialog class="dialog dialog--key" id="apiKeyDialog" aria-labelledby="apiKeyDialogTitle">
+    <form class="dialog-form" id="apiKeyForm" novalidate>
+      <div class="dialog-head">
+        <div>
+          <p class="eyebrow">MCP 密钥</p>
+          <h2 id="apiKeyDialogTitle">新建 MCP 密钥</h2>
+        </div>
+        <button class="icon-btn" type="button" data-close-api-key aria-label="关闭">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true">
+            <path d="M6 6l12 12M18 6 6 18" />
+          </svg>
+        </button>
+      </div>
+
+      <div class="field">
+        <label for="apiKeyName">名称</label>
+        <input id="apiKeyName" maxlength="40" autocomplete="off" placeholder="例如：运维 AI 助手" />
+      </div>
+      <div class="field">
+        <label for="apiKeyNote">备注 <span class="optional">可选</span></label>
+        <input id="apiKeyNote" maxlength="160" autocomplete="off" placeholder="用途、负责人或有效期说明" />
+      </div>
+      <div class="field">
+        <label>授权范围</label>
+        <div class="radio-row">
+          <label><input type="radio" name="apiKeyScope" value="all" /> 全部数据</label>
+          <label><input type="radio" name="apiKeyScope" value="scoped" checked /> 指定分组 / 单条通知</label>
+        </div>
+      </div>
+      <div id="apiKeyScopeFields">
+        <div class="field">
+          <label>授权分组</label>
+          <div class="check-list check-list--groups" id="apiKeyGroups"></div>
+        </div>
+        <div class="field">
+          <label>授权单条通知</label>
+          <div class="check-list check-list--events" id="apiKeyEvents"></div>
+        </div>
+      </div>
+      <label class="checkbox-row">
+        <input type="checkbox" id="apiKeyReadOnly" />
+        只读密钥（不能修改、删除或重发）
+      </label>
+      <p class="field-error" id="apiKeyError" hidden></p>
+      <div class="dialog-foot">
+        <button class="ghost-btn" type="button" data-close-api-key>取消</button>
+        <button class="primary-btn" id="apiKeySaveBtn" type="submit">创建密钥</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="dialog" id="revealKeyDialog" aria-labelledby="revealKeyTitle">
+    <div class="dialog-form">
+      <div class="dialog-head">
+        <div>
+          <p class="eyebrow">MCP 密钥</p>
+          <h2 id="revealKeyTitle">密钥已创建</h2>
+        </div>
+        <button class="icon-btn" type="button" data-close-reveal aria-label="关闭">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true">
+            <path d="M6 6l12 12M18 6 6 18" />
+          </svg>
+        </button>
+      </div>
+      <p class="field-help">只显示一次，请立即复制保存。AI 客户端通过 <code>Authorization: Bearer &lt;密钥&gt;</code> 访问 <code>/mcp</code>。</p>
+      <pre class="key-secret" id="revealKeySecret"></pre>
+      <div class="dialog-foot">
+        <button class="ghost-btn" id="copyRevealKeyBtn" type="button">复制密钥</button>
+        <button class="primary-btn" type="button" data-close-reveal>完成</button>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog class="dialog dialog--dark" id="curlDialog" aria-labelledby="curlTitle">
+    <div class="dialog-head">
+      <div>
+        <p class="eyebrow">发送测试请求</p>
+        <h2 id="curlTitle">在终端里运行</h2>
+      </div>
+      <button class="icon-btn" type="button" data-close-dialog aria-label="关闭">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true">
+          <path d="M6 6l12 12M18 6 6 18" />
+        </svg>
+      </button>
+    </div>
+    <pre class="curl-block"><code id="curlCode"></code></pre>
+    <p class="curl-hint">运行后，新请求会通过 SSE 实时出现在列表里。按 Esc 关闭。</p>
+    <div class="dialog-foot">
+      <button class="ghost-btn" id="copyCurlBtn" type="button">复制命令</button>
+      <button class="primary-btn" type="button" data-close-dialog>知道了</button>
+    </div>
+  </dialog>
+
+
+  <div class="login-screen" id="loginScreen" hidden>
+    <form class="login-card" id="loginForm" novalidate>
+      <div class="login-brand">HOOKROOM <span>钩子间</span></div>
+      <h1>登录</h1>
+      <p class="login-desc">这个实例已启用账号保护，请输入账号和密码。</p>
+      <div class="field">
+        <label for="loginUsername">账号</label>
+        <input id="loginUsername" autocomplete="username" />
+      </div>
+      <div class="field">
+        <label for="loginPassword">密码</label>
+        <input id="loginPassword" type="password" autocomplete="current-password" />
+      </div>
+      <div class="field" id="loginTotpField" hidden>
+        <label for="loginTotp">动态验证码</label>
+        <input id="loginTotp" inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="6 位数字" />
+      </div>
+      <p class="field-error" id="loginError" hidden></p>
+      <button class="primary-btn login-submit" type="submit">登录</button>
+    </form>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite">
+    <span class="toast-mark" aria-hidden="true"></span>
+    <span id="toastText"></span>
+  </div>
+
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
