@@ -233,20 +233,28 @@ async function listDavBackups(settings) {
   return [...new Set(names)].sort().reverse();
 }
 
-/* 恢复：先试配置文件名与当天文件，再列目录找最新的 hookroom-日期.json */
-export async function downloadWebdav(settings) {
-  const candidates = [backupFilename()];
+/* 恢复：指定文件名则只读它；否则当天文件 → 目录里最新的 hookroom-日期.json */
+export async function downloadWebdav(settings, filename = '') {
+  const requested = String(filename || '').trim();
+  if (requested) {
+    const content = await readDavFile(settings, requested);
+    if (content !== null) return { content, filename: requested };
+    throw new HttpError(404, `WebDAV 上没有找到 ${requested}`);
+  }
+
+  const candidates = [];
   const configured = String(settings.path || '').trim();
   if (configured) candidates.push(configured);
+  candidates.push(backupFilename());
 
   for (const name of candidates) {
     const content = await readDavFile(settings, name);
-    if (content !== null) return content;
+    if (content !== null) return { content, filename: name };
   }
 
   for (const name of await listDavBackups(settings)) {
     const content = await readDavFile(settings, name);
-    if (content !== null) return content;
+    if (content !== null) return { content, filename: name };
   }
 
   throw new HttpError(404, 'WebDAV 上没有找到备份文件');

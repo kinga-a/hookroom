@@ -2180,7 +2180,6 @@ function renderBackupTools() {
         <div class="field"><label for="webdavUrl">WebDAV 目录地址</label><input id="webdavUrl" name="url" type="url" value="${escapeAttr(webdav.url || '')}" placeholder="https://dav.example.com/backups/" /></div>
         <div class="field"><label for="webdavUsername">用户名</label><input id="webdavUsername" name="username" value="${escapeAttr(webdav.username || '')}" autocomplete="off" /></div>
         <div class="field"><label for="webdavPassword">密码</label><input id="webdavPassword" name="password" type="password" placeholder="${webdav.hasPassword ? '已设置，留空保持不变' : 'WebDAV 密码'}" autocomplete="new-password" /></div>
-        <div class="field"><label for="webdavPath">恢复文件名 <span class="optional">可选</span></label><input id="webdavPath" name="path" value="${escapeAttr(webdav.path || '')}" placeholder="留空自动找最新的 hookroom-日期.json" /></div>
         <p class="field-help">备份文件固定命名为 hookroom-YYYY-MM-DD.json。</p>
         <p class="field-error" data-tools-error hidden></p>
         <button class="ghost-btn" type="submit">保存 WebDAV 设置</button>
@@ -2192,6 +2191,7 @@ function renderBackupTools() {
         <div class="tools-actions">
           <button class="primary-btn" type="button" data-tools-action="webdav-backup">备份到 WebDAV</button>
         </div>
+        <div class="field"><label for="webdavRestoreFile">恢复文件名 <span class="optional">可选</span></label><input id="webdavRestoreFile" placeholder="留空自动找最新的 hookroom-日期.json" /></div>
         <div class="field"><label for="webdavRestorePassword">恢复密码 <span class="optional">可选</span></label><input id="webdavRestorePassword" type="password" autocomplete="current-password" /></div>
         <div class="field"><label for="webdavRestoreMode">恢复方式</label>
           <select id="webdavRestoreMode"><option value="merge" selected>合并（保留现有数据，推荐）</option><option value="overwrite">覆盖（清空后恢复）</option></select>
@@ -2536,6 +2536,7 @@ async function backupToWebdav(button = null) {
 
 async function restoreFromWebdav(button = null) {
   const password = dom.toolsBody.querySelector('#webdavRestorePassword')?.value ?? '';
+  const filename = dom.toolsBody.querySelector('#webdavRestoreFile')?.value.trim() ?? '';
   const mode = dom.toolsBody.querySelector('#webdavRestoreMode')?.value === 'overwrite' ? 'overwrite' : 'merge';
   const message = mode === 'overwrite'
     ? '覆盖恢复会清空当前所有数据，继续？'
@@ -2548,8 +2549,8 @@ async function restoreFromWebdav(button = null) {
   }
   setToolsResult('pending', '正在从 WebDAV 下载并恢复…');
   try {
-    const result = await api('/api/backup/webdav/restore', { method: 'POST', body: { password, mode } });
-    setToolsResult('success', `${result.mode === 'overwrite' ? '覆盖' : '合并'}恢复完成，正在刷新`);
+    const result = await api('/api/backup/webdav/restore', { method: 'POST', body: { password, mode, filename } });
+    setToolsResult('success', `${result.mode === 'overwrite' ? '覆盖' : '合并'}恢复完成 · ${result.file || 'WebDAV'}，正在刷新`);
     toast(`${result.mode === 'overwrite' ? '覆盖' : '合并'}恢复完成，正在刷新`, 'neutral', 4200);
     setTimeout(() => window.location.reload(), 600);
   } catch (error) {

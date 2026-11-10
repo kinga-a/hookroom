@@ -665,11 +665,11 @@ export async function handleApi(request, store) {
       const payload = await readJsonBody(request, 256 * 1024);
       const settings = initialState.backup ?? emptyBackupSettings();
       if (!settings.webdav?.url) throw new HttpError(400, '请先配置 WebDAV 地址');
-      const content = await downloadWebdav(settings.webdav);
+      const { content, filename } = await downloadWebdav(settings.webdav, payload.filename);
       const data = parseBackup(content, String(payload.password ?? ''));
       const mode = payload.mode === 'overwrite' ? 'overwrite' : 'merge';
       const applied = await applyBackupData(data, store, request, initialState, mode);
-      return json(200, applied.result, applied.headers);
+      return json(200, { ...applied.result, file: filename }, applied.headers);
     }
 
     if (pathname === '/api/groups' && method === 'PUT') {
