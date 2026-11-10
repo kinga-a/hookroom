@@ -1754,7 +1754,7 @@ function buildCompactPanel(endpoint) {
         <button class="compact-notification" type="button" data-compact-event="${escapeAttr(event.id)}">
           <span class="compact-time" title="${escapeAttr(formatDateTime(event.receivedAt))}">${escapeHtml(timeLabel(event.receivedAt))}</span>
           <span class="method-badge" data-method="${escapeAttr(event.method)}">${escapeHtml(event.method)}</span>
-          <span class="compact-preview">${escapeHtml(extractPreview(event) || '（无正文）')}</span>
+          <span class="compact-preview">${escapeHtml((extractPreview(event) || '（无正文）').slice(0, 72))}</span>
         </button>
       `).join('')
     : `<div class="compact-empty compact-empty--panel">
@@ -1826,7 +1826,6 @@ function applyCompactPage(pageButton) {
   holder.innerHTML = buildCompactPanel(endpoint).trim();
   const nextPanel = holder.firstElementChild;
   if (!nextPanel) return;
-  cancelCompactAnimations(panel);
   panel.replaceWith(nextPanel);
 
   /* 翻页后若分页条落到视口外，补一次滚动，避免看起来“按钮消失了” */
@@ -1861,12 +1860,7 @@ function handleCompactClick(event) {
     state.compactExpandedId = null;
     endpointButton.classList.remove('is-open');
     endpointButton.setAttribute('aria-expanded', 'false');
-    const panel = item?.querySelector('.compact-panel') ?? null;
-    playCompactPanelOut(item, panel, () => {
-      /* 动画期间又展开了同一个端点时，交给展开分支处理 */
-      if (state.compactExpandedId === id) return;
-      if (panel?.isConnected) panel.remove();
-    });
+    item?.querySelector('.compact-panel')?.remove();
     return;
   }
 
@@ -1876,157 +1870,25 @@ function handleCompactClick(event) {
   if (!endpoint || !item) return;
   endpointButton.classList.add('is-open');
   endpointButton.setAttribute('aria-expanded', 'true');
-  /* 插入前先记录下方条目的位置，供 FLIP 补位使用 */
-  const siblings = captureCompactSiblings(item);
   item.querySelector('.compact-panel')?.remove();
   item.insertAdjacentHTML('beforeend', buildCompactPanel(endpoint));
-  playCompactPanelIn(item, item.querySelector('.compact-panel'), siblings);
+  playCompactPanelIn(item.querySelector('.compact-panel'));
 }
 
-/* ── 简约模式展开动画（bouncy-access 风格）────────────── */
+/* ── 简约模式展开：一次很轻的淡入，不做回弹与位移补位 ── */
 
-const COMPACT_SPRING = 'cubic-bezier(0.34, 1.35, 0.45, 1)';
-const COMPACT_COLLAPSE = 'cubic-bezier(0.32, 0.72, 0, 1)';
 const COMPACT_MOTION = window.matchMedia('(prefers-reduced-motion: reduce)');
 
 function prefersReducedMotion() {
   return COMPACT_MOTION.matches;
 }
 
-/* 展开/收起前先清掉面板里还在跑的动画，避免两组 height 逐帧互相抢值 */
-function cancelCompactAnimations(panel) {
-  if (!panel) return;
-  const nodes = panel.querySelectorAll('.compact-panel-head, .compact-notification');
-  for (const node of [panel, ...nodes]) {
-    for (const animation of node.getAnimations()) animation.cancel();
-  }
-}
-
-function captureCompactSiblings(item) {
-  const entries = [];
-  let next = item?.nextElementSibling;
-  while (next) {
-    entries.push({ el: next, top: next.getBoundingClientRect().top });
-    next = next.nextElementSibling;
-  }
-  return entries;
-}
-
-/* FLIP：下方条目先用 transform 退回旧位置，再滑到新位置，全程只走合成层 */
-function flipCompactSiblings(entries, duration, easing) {
-  if (!entries?.length) return;
-  const moves = entries
-    .map(({ el, top }) => ({ el, delta: top - el.getBoundingClientRect().top }))
-    .filter(({ delta }) => Math.abs(delta) > 0.5);
-  if (!moves.length) return;
-
-  for (const { el, delta } of moves) {
-    el.style.transition = 'none';
-    el.style.transform = `translateY(${delta}px)`;
-  }
-  void dom.compactList.offsetHeight;
-  requestAnimationFrame(() => {
-    for (const { el } of moves) {
-      el.style.transition = `transform ${duration}ms ${easing}`;
-      el.style.transform = '';
-      el.addEventListener('transitionend', () => { el.style.transition = ''; }, { once: true });
-    }
-  });
-  setTimeout(() => {
-    for (const { el } of moves) el.style.transition = '';
-  }, duration + 80);
-}
-
-function playCompactPanelIn(item, panel, siblings) {
+function playCompactPanelIn(panel) {
   if (!panel || prefersReducedMotion()) return;
-  cancelCompactAnimations(panel);
-  if (!panel.getBoundingClientRect().height) return;
-
-  flipCompactSiblings(siblings, 520, COMPACT_SPRING);
-
-  /* 用裁切揭示代替 height 动画，避免逐帧重排 */
-  const motion = panel.animate(
-    [
-      { clipPath: 'inset(0 0 100% 0)', opacity: 0.35 },
-      { clipPath: 'inset(0 0 0 0)', opacity: 1 },
-    ],
-    { duration: 520, easing: COMPACT_SPRING, fill: 'both' },
-  );
-  const clear = () => {
-    if (!panel.isConnected) return;
-    motion.cancel();
-  };
-  motion.finished.then(clear, clear);
-
-  const head = panel.querySelector('.compact-panel-head');
-  if (head) {
-    head.animate(
-      [
-        { opacity: 0, transform: 'translateY(6px)' },
-        { opacity: 1, transform: 'translateY(0)' },
-      ],
-      { duration: 420, delay: 80, easing: COMPACT_SPRING, fill: 'backwards' },
-    );
-  }
-
-  const rows = panel.querySelectorAll('.compact-notification');
-  rows.forEach((row, index) => {
-    if (index > 4) return;
-    row.animate(
-      [
-        { opacity: 0, transform: 'translateY(7px)' },
-        { opacity: 1, transform: 'translateY(0)' },
-      ],
-      { duration: 460, delay: 90 + index * 45, easing: COMPACT_SPRING, fill: 'backwards' },
-    );
-  });
-
-  const rect = panel.getBoundingClientRect();
-  if (rect.bottom > window.innerHeight - 8) {
-    window.scrollBy({ top: rect.bottom - window.innerHeight + 24, behavior: 'auto' });
-  }
-}
-
-function playCompactPanelOut(item, panel, done) {
-  if (!panel || prefersReducedMotion()) {
-    done();
-    return;
-  }
-  cancelCompactAnimations(panel);
-  const height = panel.getBoundingClientRect().height;
-  if (!height) {
-    done();
-    return;
-  }
-
-  const siblings = captureCompactSiblings(item);
-  for (const { el } of siblings) {
-    el.style.transition = `transform 320ms ${COMPACT_COLLAPSE}`;
-    el.style.transform = `translateY(${-height}px)`;
-  }
-
-  const motion = panel.animate(
-    [
-      { clipPath: 'inset(0 0 0 0)', opacity: 1 },
-      { clipPath: 'inset(0 0 100% 0)', opacity: 0.35 },
-    ],
-    { duration: 320, easing: COMPACT_COLLAPSE, fill: 'both' },
-  );
-
-  let settled = false;
-  const settle = () => {
-    if (settled) return;
-    settled = true;
-    /* 先撤掉位移，再移除面板：同一帧内完成，视觉上连续 */
-    for (const { el } of siblings) {
-      el.style.transition = '';
-      el.style.transform = '';
-    }
-    done();
-  };
-  motion.finished.then(settle, settle);
-  /* 兜底：动画被打断或标签页切换时仍能收尾 */
-  setTimeout(settle, 420);
+  panel.classList.add('is-entering');
+  const clear = () => panel.classList.remove('is-entering');
+  panel.addEventListener('animationend', clear, { once: true });
+  setTimeout(clear, 300);
 }
 
 /* ── 工具与登录 ────────────────────────────────────── */
