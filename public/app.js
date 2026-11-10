@@ -665,9 +665,27 @@ function renderHeader() {
   }
 }
 
+function animateStat(el, target) {
+  const from = Number(el.dataset.value ?? target);
+  el.dataset.value = String(target);
+  if (from === target || prefersReducedMotion()) {
+    el.textContent = numberFormatter.format(target);
+    return;
+  }
+  const started = performance.now();
+  const duration = 520;
+  const tick = (now) => {
+    const progress = Math.min((now - started) / duration, 1);
+    const eased = 1 - (1 - progress) ** 3;
+    el.textContent = numberFormatter.format(Math.round(from + (target - from) * eased));
+    if (progress < 1) requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+}
+
 function renderStats() {
-  dom.statTotal.textContent = numberFormatter.format(state.stats.total);
-  dom.statToday.textContent = numberFormatter.format(state.stats.today);
+  animateStat(dom.statTotal, state.stats.total);
+  animateStat(dom.statToday, state.stats.today);
   const active = state.endpoints.filter((item) => item.active).length;
   dom.statActive.textContent = `${active}/${state.endpoints.length}`;
 }
@@ -1649,9 +1667,13 @@ async function copyText(text) {
   return ok;
 }
 
-async function copyAndToast(text, message) {
+async function copyAndToast(text, message, button = null) {
   const ok = await copyText(text);
   toast(ok ? message : '复制失败，请手动选择文本', ok ? 'neutral' : 'error');
+  if (ok && button?.classList) {
+    button.classList.add('is-copied');
+    setTimeout(() => button.classList.remove('is-copied'), 900);
+  }
 }
 
 function buildCurl(event) {
@@ -1735,7 +1757,11 @@ function buildCompactPanel(endpoint) {
           <span class="compact-preview">${escapeHtml(extractPreview(event) || '（无正文）')}</span>
         </button>
       `).join('')
-    : '<p class="compact-empty compact-empty--panel">这个端点还没有收到通知。</p>';
+    : `<div class="compact-empty compact-empty--panel">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 13.5V6a1.5 1.5 0 0 1 1.5-1.5h13A1.5 1.5 0 0 1 20 6v7.5"/><path d="M4 13.5h4l1.2 2.2h5.6L16 13.5h4V18a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 18v-4.5Z"/></svg>
+        <p>这个端点还没有收到通知</p>
+        <span>向 <code>/hook/${escapeHtml(endpoint.slug)}</code> 发一条试试</span>
+      </div>`;
 
   const pager = totalPages > 1
     ? `<div class="compact-pager">
@@ -2848,7 +2874,7 @@ function bindEvents() {
   dom.copyEndpointUrl.addEventListener('click', () => {
     const endpoint = currentEndpoint();
     if (!endpoint) return;
-    copyAndToast(`${location.origin}/hook/${endpoint.slug}`, '接收地址已复制');
+    copyAndToast(`${location.origin}/hook/${endpoint.slug}`, '接收地址已复制', dom.copyEndpointUrl);
   });
 
   dom.filters.addEventListener('click', (event) => {
@@ -3042,7 +3068,7 @@ function bindEvents() {
   });
 
   dom.copyCurlBtn.addEventListener('click', () => {
-    copyAndToast(dom.curlCode.textContent ?? '', 'curl 命令已复制');
+    copyAndToast(dom.curlCode.textContent ?? '', 'curl 命令已复制', dom.copyCurlBtn);
   });
 
   dom.detailBody.addEventListener('click', async (event) => {
@@ -3057,8 +3083,8 @@ function bindEvents() {
     }
     if (!action) return;
 
-    if (action === 'copy-curl') await copyAndToast(buildCurl(current), 'curl 命令已复制');
-    if (action === 'copy-body') await copyAndToast(current.body ?? '', '请求体已复制');
+    if (action === 'copy-curl') await copyAndToast(buildCurl(current), 'curl 命令已复制', event.target.closest('[data-detail-action]'));
+    if (action === 'copy-body') await copyAndToast(current.body ?? '', '请求体已复制', event.target.closest('[data-detail-action]'));
     if (action === 'resend') {
       await resendFailedNotifications(current, event.target.closest('[data-detail-action="resend"]'));
     }
